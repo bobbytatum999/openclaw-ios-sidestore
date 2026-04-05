@@ -73,7 +73,12 @@ jobs:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       run: |
-        echo "${APPLE_ID}" | ipatool auth login -e -p "${APPLE_PASSWORD}"
+        # Create a temporary file with the password
+        echo "${APPLE_PASSWORD}" > /tmp/pass.txt
+        # Use -f flag to read password from file
+        ipatool auth login -e "${APPLE_ID}" -f /tmp/pass.txt
+        # Clean up the temporary file
+        rm /tmp/pass.txt
         
     - name: Extract App ID from TestFlight URL
       id: extract_app_id
