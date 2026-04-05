@@ -23,7 +23,7 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Setup GUI for workflow
       run: |
@@ -52,7 +52,7 @@ jobs:
         EOF
         
     - name: Upload initial HTML
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: progress-page
         path: progress.html
@@ -145,7 +145,7 @@ jobs:
         echo "ipa_name=$OUTPUT_NAME" >> $GITHUB_OUTPUT
         
     - name: Upload IPA artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.create_unsigned.outputs.ipa_name || steps.create_signed.outputs.ipa_name }}
         path: ./*.ipa
@@ -198,7 +198,7 @@ jobs:
         EOF
         
     - name: Upload final HTML
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: progress-page-final
         path: progress.html
