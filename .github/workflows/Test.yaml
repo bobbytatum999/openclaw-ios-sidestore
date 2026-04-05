@@ -1,0 +1,212 @@
+name: TestFlight IPA Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      testflight_url:
+        description: 'Enter the TestFlight URL (e.g., itms-beta://testflight.apple.com/join/EdDHgYJT)'
+        required: true
+        type: string
+      app_name:
+        description: 'Enter a custom name for the IPA file (optional)'
+        required: false
+        type: string
+        default: 'extracted-app'
+      create_unsigned:
+        description: 'Create unsigned IPA?'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  extract-and-convert:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: Setup GUI for workflow
+      run: |
+        # Create a simple HTML interface to display progress
+        cat > progress.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>TestFlight IPA Extractor</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .info { background-color: #e7f3fe; }
+            .success { background-color: #d4edda; }
+            .error { background-color: #f8d7da; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>TestFlight IPA Extractor</h1>
+            <div id="status" class="status info">Initializing extraction process...</div>
+          </div>
+        </body>
+        </html>
+        EOF
+        
+    - name: Upload initial HTML
+      uses: actions/upload-artifact@v3
+      with:
+        name: progress-page
+        path: progress.html
+        
+    - name: Display progress page URL
+      run: |
+        echo "=========================================="
+        echo "Monitor progress at:"
+        echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "=========================================="
+        
+    - name: Install ipatool
+      run: |
+        brew install ipatool
+        
+    - name: Authenticate with Apple ID
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      run: |
+        echo "${APPLE_ID}" | ipatool auth login -e -p "${APPLE_PASSWORD}"
+        
+    - name: Extract App ID from TestFlight URL
+      id: extract_app_id
+      run: |
+        URL="${{ github.event.inputs.testflight_url }}"
+        # Extract app ID from URL
+        APP_ID=$(echo "$URL" | sed -n 's/.*join\/\([^/]*\).*/\1/p')
+        echo "Extracted App ID: $APP_ID"
+        echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+        
+    - name: Download TestFlight app
+      run: |
+        ipatool download -b ${{ steps.extract_app_id.outputs.app_id }}
+        
+    - name: Create unsigned IPA
+      if: ${{ github.event.inputs.create_unsigned == 'true' }}
+      run: |
+        # Find the downloaded app
+        APP_NAME=$(find . -name "*.app" -maxdepth 1 -exec basename {} .app \;)
+        CUSTOM_NAME="${{ github.event.inputs.app_name }}"
+        
+        # Remove existing signatures to make it unsigned
+        echo "Removing code signature..."
+        codesign --remove-signature "$APP_NAME.app"
+        
+        # Remove provisioning profiles
+        echo "Removing provisioning profiles..."
+        find "$APP_NAME.app" -name "*.mobileprovision" -delete
+        
+        # Remove extended attributes
+        echo "Removing extended attributes..."
+        xattr -cr "$APP_NAME.app"
+        
+        # Create IPA if not already in IPA format
+        mkdir -p Payload
+        cp -R "$APP_NAME.app" Payload/
+        
+        # Use custom name if provided, otherwise use the app name
+        if [ -n "$CUSTOM_NAME" ]; then
+          OUTPUT_NAME="$CUSTOM_NAME.ipa"
+        else
+          OUTPUT_NAME="$APP_NAME.ipa"
+        fi
+        
+        zip -r "$OUTPUT_NAME" Payload/
+        echo "Created unsigned IPA: $OUTPUT_NAME"
+        echo "ipa_name=$OUTPUT_NAME" >> $GITHUB_OUTPUT
+        
+    - name: Create signed IPA
+      if: ${{ github.event.inputs.create_unsigned == 'false' }}
+      run: |
+        # Find the downloaded app
+        APP_NAME=$(find . -name "*.app" -maxdepth 1 -exec basename {} .app \;)
+        CUSTOM_NAME="${{ github.event.inputs.app_name }}"
+        
+        # Create IPA if not already in IPA format
+        mkdir -p Payload
+        cp -R "$APP_NAME.app" Payload/
+        
+        # Use custom name if provided, otherwise use the app name
+        if [ -n "$CUSTOM_NAME" ]; then
+          OUTPUT_NAME="$CUSTOM_NAME.ipa"
+        else
+          OUTPUT_NAME="$APP_NAME.ipa"
+        fi
+        
+        zip -r "$OUTPUT_NAME" Payload/
+        echo "Created signed IPA: $OUTPUT_NAME"
+        echo "ipa_name=$OUTPUT_NAME" >> $GITHUB_OUTPUT
+        
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ steps.create_unsigned.outputs.ipa_name || steps.create_signed.outputs.ipa_name }}
+        path: ./*.ipa
+        retention-days: 7
+        
+    - name: Generate download URL
+      id: create_download_url
+      run: |
+        # Create a download URL that expires in 7 days
+        DOWNLOAD_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+        
+    - name: Update HTML with success status
+      run: |
+        cat > progress.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>TestFlight IPA Extractor</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .info { background-color: #e7f3fe; }
+            .success { background-color: #d4edda; }
+            .error { background-color: #f8d7da; }
+            .download-btn { 
+              background-color: #4CAF50; 
+              color: white; 
+              padding: 14px 20px; 
+              margin: 8px 0; 
+              border: none; 
+              cursor: pointer; 
+              border-radius: 4px; 
+              text-decoration: none; 
+              display: inline-block;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>TestFlight IPA Extractor</h1>
+            <div class="status success">Extraction completed successfully!</div>
+            <p>Your IPA file is ready for download.</p>
+            <a href="${{ steps.create_download_url.outputs.download_url }}" class="download-btn">Download IPA</a>
+            <p><strong>Note:</strong> You will need to download the IPA from the Artifacts section of the GitHub Actions run.</p>
+          </div>
+        </body>
+        </html>
+        EOF
+        
+    - name: Upload final HTML
+      uses: actions/upload-artifact@v3
+      with:
+        name: progress-page-final
+        path: progress.html
+        
+    - name: Display completion message
+      run: |
+        echo "=========================================="
+        echo "IPA extraction completed successfully!"
+        echo "Download your IPA file from:"
+        echo "${{ steps.create_download_url.outputs.download_url }}"
+        echo "=========================================="
