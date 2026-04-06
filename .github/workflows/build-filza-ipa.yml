@@ -1,0 +1,72 @@
+name: Build Filza Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: "DEB download URL (leave blank for default Filza 4.0.1-2)"
+        required: false
+        default: "https://tigisoftware.com/cydia/com.tigisoftware.filza_4.0.1-2_iphoneos-arm.deb"
+      ipa_name:
+        description: "Output IPA filename"
+        required: false
+        default: "Filza-Jailed-26-UncleTyrone.ipa"
+
+jobs:
+  build-ipa:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get install -y binutils
+
+      - name: Download DEB
+        run: |
+          curl -L --fail -o filza.deb "${{ github.event.inputs.deb_url }}"
+
+      - name: Extract DEB
+        run: |
+          mkdir deb_extracted
+          cd deb_extracted
+          ar -x ../filza.deb
+
+          DATA_TAR="$(ls data.tar.* 2>/dev/null | head -n1 || true)"
+          if [[ -z "$DATA_TAR" ]]; then
+            echo "[-] data.tar.* not found. Contents:"
+            ar -t ../filza.deb
+            exit 1
+          fi
+          echo "DATA_TAR=$DATA_TAR" >> $GITHUB_ENV
+
+          mkdir data_extracted
+          tar -xf "$DATA_TAR" -C data_extracted
+
+      - name: Locate Filza.app
+        run: |
+          FILZA_APP_PATH="$(find deb_extracted/data_extracted -type d -iname 'Filza.app' | head -n1 || true)"
+          if [[ -z "$FILZA_APP_PATH" ]]; then
+            echo "[-] Filza.app not found. Top-level dirs:"
+            find deb_extracted/data_extracted -maxdepth 3 -type d
+            exit 1
+          fi
+          echo "[+] Found: $FILZA_APP_PATH"
+          echo "FILZA_APP_PATH=$FILZA_APP_PATH" >> $GITHUB_ENV
+
+      - name: Build Payload and IPA
+        run: |
+          mkdir -p Payload
+          cp -R "${{ env.FILZA_APP_PATH }}" Payload/
+
+          # Strip code signature and provisioning profile
+          rm -rf Payload/Filza.app/_CodeSignature || true
+          rm -f  Payload/Filza.app/embedded.mobileprovision || true
+
+          zip -r "${{ github.event.inputs.ipa_name }}" Payload/ > /dev/null
+          echo "[+] IPA built: ${{ github.event.inputs.ipa_name }}"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Filza-Unsigned-IPA
+          path: ${{ github.event.inputs.ipa_name }}
+          retention-days: 7
